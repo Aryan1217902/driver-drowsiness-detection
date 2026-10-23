@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Driver Drowsiness Detection (DDD) - Live Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Prominent Drowsiness Alert Banner -->
+  <div id="drowsinessBanner" class="alert-banner hidden" role="alert">
+    <div class="banner-content">
+      <span class="banner-icon">⚠️</span>
+      <div class="banner-text">
+        <strong>CRITICAL DROWSINESS ALERT!</strong>
+        <span>Driver eyes closed for &ge; 2.0s. Please wake up and pull over safely!</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-container">
+    <!-- Top Header -->
+    <header class="dashboard-header">
+      <div class="header-branding">
+        <div class="pulse-indicator" id="liveDot" aria-hidden="true"></div>
+        <h1>Driver Drowsiness Detection</h1>
+        <span class="badge badge-system">AI Monitoring</span>
+      </div>
+      <div class="header-status">
+        <div class="status-pill" id="monitoringHealthPill">
+          <span class="status-dot gray" id="monitoringDot"></span>
+          <span id="monitoringStatusText">Monitoring: Stopped</span>
+        </div>
+        <div class="status-pill" id="cameraHealthPill">
+          <span class="status-dot red" id="cameraDot"></span>
+          <span id="cameraStatusText">Camera: Unavailable</span>
+        </div>
+        <div class="status-pill" id="faceStatusPill">
+          <span class="status-dot yellow" id="faceDot"></span>
+          <span id="faceStatusText">Face: Searching</span>
+        </div>
+        <div class="status-pill" id="backendHealthPill">
+          <span class="status-dot gray" id="backendDot"></span>
+          <span id="backendStatusText">Backend: Checking</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="dashboard-grid">
+      <!-- Left Column: Video Viewport -->
+      <section class="video-section card">
+        <div class="monitoring-controls" aria-label="Monitoring controls">
+          <button id="startMonitoringBtn" class="btn-monitoring btn-start" type="button">Start Monitoring</button>
+          <button id="stopMonitoringBtn" class="btn-monitoring btn-stop" type="button" disabled>Stop Monitoring</button>
+          <span id="monitoringMessage" class="monitoring-message" role="status" aria-live="polite"></span>
+        </div>
+        <div class="card-header">
+          <h2>Live Driver Camera Feed</h2>
+          <div class="feed-stats">
+            <span class="stat-badge" id="fpsBadge">-- FPS</span>
+            <span class="stat-badge" id="sessionElapsedBadge">Session: 00:00</span>
+          </div>
+        </div>
+        <div class="video-wrapper">
+          <img
+            id="videoFeed"
+            src="/video_feed"
+            alt="Live Driver Video Stream with Overlays"
+            class="video-stream"
+          />
+          <div class="video-overlay-status" id="videoOverlayStatus">
+            <span id="videoStatusTag" class="tag tag-neutral">MONITORING STOPPED</span>
+          </div>
+          <div id="videoFeedMessage" class="video-feed-message" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="video-footer">
+          <p class="caption">
+            Annotated feed with real-time MediaPipe face mesh, eye contours, and detection telemetry.
+          </p>
+        </div>
+      </section>
+
+      <!-- Right Column: Telemetry & Status Cards -->
+      <section class="telemetry-section">
+        <!-- Prominent Drowsiness Indicator Card -->
+        <div class="card drowsiness-card" id="drowsinessCard">
+          <div class="card-header">
+            <h3>Driver Alertness State</h3>
+            <span class="badge" id="drowsinessBadge">NORMAL</span>
+          </div>
+          <div class="drowsiness-body">
+            <div class="state-display" id="closureStateText">INITIALIZING...</div>
+            <div class="duration-meter-wrapper">
+              <div class="duration-label">
+                <span>Continuous Closure Duration</span>
+                <span id="closureDurationText">0.0s / 2.0s</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div class="progress-bar-fill duration-fill" id="durationFill" style="width: 0%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Eye Aspect Ratio (EAR) Cards Grid -->
+        <div class="eyes-grid">
+          <!-- Left Eye Card -->
+          <div class="card eye-card" id="leftEyeCard">
+            <div class="eye-header">
+              <h4>Left Eye</h4>
+              <span class="eye-status-badge badge-neutral" id="leftEyeStatus">--</span>
+            </div>
+            <div class="ear-readings">
+              <div class="ear-reading">
+                <span class="ear-reading-label">Raw EAR</span>
+                <span class="ear-reading-value" id="leftRawEarValue">Unavailable</span>
+              </div>
+              <div class="ear-reading">
+                <span class="ear-reading-label">Smoothed EAR</span>
+                <span class="ear-num" id="leftEarValue">Unavailable</span>
+              </div>
+            </div>
+            <div class="ear-value-display">
+              <span class="measurement-state" id="leftMeasurementState">Measurement unavailable</span>
+              <span class="ear-threshold" id="leftThresholdValue">Threshold: --</span>
+            </div>
+            <div class="ear-gauge-wrapper">
+              <div class="gauge-bg">
+                <div class="gauge-fill" id="leftEarGauge" style="width: 0%;"></div>
+                <div class="gauge-threshold-line" id="leftThresholdMarker" style="left: 0%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Eye Card -->
+          <div class="card eye-card" id="rightEyeCard">
+            <div class="eye-header">
+              <h4>Right Eye</h4>
+              <span class="eye-status-badge badge-neutral" id="rightEyeStatus">--</span>
+            </div>
+            <div class="ear-readings">
+              <div class="ear-reading">
+                <span class="ear-reading-label">Raw EAR</span>
+                <span class="ear-reading-value" id="rightRawEarValue">Unavailable</span>
+              </div>
+              <div class="ear-reading">
+                <span class="ear-reading-label">Smoothed EAR</span>
+                <span class="ear-num" id="rightEarValue">Unavailable</span>
+              </div>
+            </div>
+            <div class="ear-value-display">
+              <span class="measurement-state" id="rightMeasurementState">Measurement unavailable</span>
+              <span class="ear-threshold" id="rightThresholdValue">Threshold: --</span>
+            </div>
+            <div class="ear-gauge-wrapper">
+              <div class="gauge-bg">
+                <div class="gauge-fill" id="rightEarGauge" style="width: 0%;"></div>
+                <div class="gauge-threshold-line" id="rightThresholdMarker" style="left: 0%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Calibration Card -->
+        <div class="card calibration-card">
+          <div class="card-header">
+            <h3>Calibration System</h3>
+            <div class="calib-header-actions">
+              <span class="badge" id="calibrationBadge">CALIBRATING</span>
+              <button id="recalibrateBtn" class="btn btn-sm btn-recalibrate" title="Restart 5-second calibration with open eyes">
+                🔄 Recalibrate
+              </button>
+            </div>
+          </div>
+          <div class="calibration-body">
+            <div class="calibration-instruction-line" id="calibrationInstructionText">
+              Face the camera, keep both eyes comfortably open, and look forward.
+            </div>
+            <div class="calibration-status-line" id="calibrationStatusText">
+              Calibrating open-eye baseline...
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill calib-fill" id="calibrationFill" style="width: 0%;"></div>
+            </div>
+            <div class="sample-counts-line">
+              <span>Valid Samples:</span>
+              <span id="sampleCountsText">Left: 0 | Right: 0 (Min: 30)</span>
+            </div>
+            <div class="baseline-line" id="baselineLine">
+              <span>Calibrated Baseline EAR:</span>
+              <span id="baselineValuesText">Left: -- | Right: --</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- System Pipeline Info -->
+        <div class="card system-info-card">
+          <div class="info-row">
+            <span class="info-label">Face landmarks:</span>
+            <span class="info-value" id="landmarksState">Unavailable</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Processing worker:</span>
+            <span class="info-value" id="pipelineState">Stopped</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Alert event:</span>
+            <span class="info-value" id="audioState">Inactive</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Threshold Ratio:</span>
+            <span class="info-value">75% of Calibration Median</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

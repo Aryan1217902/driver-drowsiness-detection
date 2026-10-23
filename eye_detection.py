@@ -2,6 +2,7 @@
 
 from collections import deque
 from dataclasses import dataclass
+import threading
 
 import numpy as np
 
@@ -24,6 +25,8 @@ class EyeMeasurement:
     ear: float | None
     threshold: float | None
     status: str
+    raw_ear: float | None = None
+    smoothed_ear: float | None = None
 
 
 @dataclass(frozen=True)
@@ -73,13 +76,32 @@ class EyeDetector:
     """Maintain per-eye calibration and smoothed OPEN/CLOSED status."""
 
     def __init__(self):
+        self._lock = threading.Lock()
         self._samples = {eye: [] for eye in EYES}
         self._thresholds = {eye: None for eye in EYES}
+        self._baselines = {eye: None for eye in EYES}
         self._history = {
             eye: deque(maxlen=SMOOTHING_WINDOW_SIZE) for eye in EYES
         }
         self._used_fallback = {eye: False for eye in EYES}
         self._calibrated = False
+
+    def reset_calibration(self):
+        """Reset calibration samples, thresholds, and history to start a new cycle."""
+        with self._lock:
+            self._samples = {eye: [] for eye in EYES}
+            self._thresholds = {eye: None for eye in EYES}
+            self._baselines = {eye: None for eye in EYES}
+            self._history = {
+                eye: deque(maxlen=SMOOTHING_WINDOW_SIZE) for eye in EYES
+            }
+            self._used_fallback = {eye: False for eye in EYES}
+            self._calibrated = False
+
+    def baselines(self):
+        """Return the calibrated baseline EAR for each eye, or None if uncalibrated/fallback."""
+        with self._lock:
+            return dict(self._baselines)
 
     def process(
         self,
@@ -107,58 +129,64 @@ class EyeDetector:
             for eye in EYES
         }
 
-        if not self._calibrated and face_landmarks is not None:
+        with self._lock:
+            if not self._calibrated and face_landmarks is not None:
+                for eye in EYES:
+                    ear = current_ears[eye]
+                    if ear is not None:
+                        self._samples[eye].append(ear)
+
+            if not self._calibrated and elapsed_seconds >= CALIBRATION_SECONDS:
+                self._finish_calibration()
+
+            if face_landmarks is None:
+                for history in self._history.values():
+                    history.clear()
+
+            measurements = {}
             for eye in EYES:
                 ear = current_ears[eye]
-                if ear is not None:
-                    self._samples[eye].append(ear)
 
-        if not self._calibrated and elapsed_seconds >= CALIBRATION_SECONDS:
-            self._finish_calibration()
+                if not self._calibrated:
+                    measurements[eye] = EyeMeasurement(
+                        ear=ear,
+                        threshold=None,
+                        status="CALIBRATING",
+                        raw_ear=ear,
+                    )
+                elif ear is None:
+                    self._history[eye].clear()
+                    measurements[eye] = EyeMeasurement(
+                        ear=None,
+                        threshold=self._thresholds[eye],
+                        status="UNAVAILABLE",
+                        raw_ear=None,
+                        smoothed_ear=None,
+                    )
+                else:
+                    # The median of a short rolling window reduces brief spikes.
+                    history = self._history[eye]
+                    history.append(ear)
+                    smoothed_ear = float(np.median(history))
+                    status = (
+                        "CLOSED"
+                        if smoothed_ear < self._thresholds[eye]
+                        else "OPEN"
+                    )
+                    measurements[eye] = EyeMeasurement(
+                        ear=smoothed_ear,
+                        threshold=self._thresholds[eye],
+                        status=status,
+                        raw_ear=ear,
+                        smoothed_ear=smoothed_ear,
+                    )
 
-        if face_landmarks is None:
-            for history in self._history.values():
-                history.clear()
-
-        measurements = {}
-        for eye in EYES:
-            ear = current_ears[eye]
-
-            if not self._calibrated:
-                measurements[eye] = EyeMeasurement(
-                    ear=ear,
-                    threshold=None,
-                    status="CALIBRATING",
-                )
-            elif ear is None:
-                self._history[eye].clear()
-                measurements[eye] = EyeMeasurement(
-                    ear=None,
-                    threshold=self._thresholds[eye],
-                    status="UNAVAILABLE",
-                )
-            else:
-                # The median of a short rolling window reduces brief spikes.
-                history = self._history[eye]
-                history.append(ear)
-                smoothed_ear = float(np.median(history))
-                status = (
-                    "CLOSED"
-                    if smoothed_ear < self._thresholds[eye]
-                    else "OPEN"
-                )
-                measurements[eye] = EyeMeasurement(
-                    ear=smoothed_ear,
-                    threshold=self._thresholds[eye],
-                    status=status,
-                )
-
-        return EyeDetectionResult(
-            left=measurements["left"],
-            right=measurements["right"],
-            calibration_status=self._calibration_status(),
-            calibrated=self._calibrated,
-        )
+            return EyeDetectionResult(
+                left=measurements["left"],
+                right=measurements["right"],
+                calibration_status=self._calibration_status(),
+                calibrated=self._calibrated,
+            )
 
     def _finish_calibration(self):
         for eye in EYES:
@@ -166,8 +194,10 @@ class EyeDetector:
             if len(samples) >= MIN_CALIBRATION_SAMPLES:
                 # Median baseline resists occasional landmark noise.
                 baseline = float(np.median(samples))
+                self._baselines[eye] = baseline
                 self._thresholds[eye] = baseline * THRESHOLD_BASELINE_RATIO
             else:
+                self._baselines[eye] = None
                 self._thresholds[eye] = FALLBACK_EAR_THRESHOLD
                 self._used_fallback[eye] = True
         self._calibrated = True
@@ -187,4 +217,5 @@ class EyeDetector:
 
     def sample_counts(self):
         """Return the number of valid calibration samples for each eye."""
-        return {eye: len(self._samples[eye]) for eye in EYES}
+        with self._lock:
+            return {eye: len(self._samples[eye]) for eye in EYES}

@@ -169,6 +169,32 @@ class EyeDetectorTests(unittest.TestCase):
         self.assertEqual(result.left.status, "CLOSED")
         self.assertEqual(result.right.status, "CLOSED")
 
+    def test_result_exposes_raw_and_smoothed_ear_without_changing_classification(self):
+        detector = EyeDetector()
+        open_face = make_face(left_ear=0.4, right_ear=0.4)
+        for _ in range(MIN_CALIBRATION_SAMPLES):
+            detector.process(open_face, 100, 100, elapsed_seconds=0)
+        detector.process(open_face, 100, 100, elapsed_seconds=5)
+        for _ in range(SMOOTHING_WINDOW_SIZE - 1):
+            detector.process(open_face, 100, 100, elapsed_seconds=5)
+
+        result = detector.process(make_face(left_ear=0.1, right_ear=0.3), 100, 100, 6)
+
+        self.assertEqual(result.left.raw_ear, 0.1)
+        self.assertEqual(result.left.smoothed_ear, 0.4)
+        self.assertEqual(result.left.ear, result.left.smoothed_ear)
+        self.assertEqual(result.left.status, "OPEN")
+        self.assertEqual(result.right.raw_ear, 0.3)
+        self.assertEqual(result.right.smoothed_ear, 0.4)
+        self.assertEqual(result.right.status, "OPEN")
+
+    def test_calibration_result_exposes_raw_value_and_no_smoothed_value(self):
+        result = EyeDetector().process(make_face(), 100, 100, elapsed_seconds=0)
+
+        self.assertEqual(result.left.raw_ear, result.left.ear)
+        self.assertIsNone(result.left.smoothed_ear)
+        self.assertEqual(result.left.status, "CALIBRATING")
+
     def test_missing_face_is_unavailable_not_closed(self):
         detector = EyeDetector()
         open_face = make_face()
@@ -201,6 +227,32 @@ class EyeDetectorTests(unittest.TestCase):
         self.assertIsNone(result.right.ear)
         self.assertEqual(result.left.status, "UNAVAILABLE")
         self.assertEqual(result.right.status, "UNAVAILABLE")
+
+    def test_reset_calibration_clears_state_and_allows_recalibration(self):
+        detector = EyeDetector()
+        face1 = make_face(left_ear=0.30, right_ear=0.30)
+        for _ in range(MIN_CALIBRATION_SAMPLES):
+            detector.process(face1, 100, 100, elapsed_seconds=0)
+        res1 = detector.process(face1, 100, 100, elapsed_seconds=5)
+
+        self.assertTrue(res1.calibrated)
+        self.assertIsNotNone(detector.baselines()["left"])
+        self.assertTrue(math.isclose(detector.baselines()["left"], 0.30, rel_tol=1e-9))
+
+        # Reset calibration
+        detector.reset_calibration()
+        self.assertEqual(detector.sample_counts()["left"], 0)
+        self.assertIsNone(detector.baselines()["left"])
+
+        # Recalibrate with different baseline
+        face2 = make_face(left_ear=0.36, right_ear=0.36)
+        for _ in range(MIN_CALIBRATION_SAMPLES):
+            detector.process(face2, 100, 100, elapsed_seconds=0)
+        res2 = detector.process(face2, 100, 100, elapsed_seconds=5)
+
+        self.assertTrue(res2.calibrated)
+        self.assertTrue(math.isclose(detector.baselines()["left"], 0.36, rel_tol=1e-9))
+        self.assertTrue(math.isclose(res2.left.threshold, 0.27, rel_tol=1e-9))
 
 
 if __name__ == "__main__":
